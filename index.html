@@ -8,9 +8,13 @@
     body { margin: 0; font-family: Arial, sans-serif; background: #000; color: #fff; }
     #canvas { border: 2px solid #ff0; }
     #hype-meter { position: absolute; top: 10px; left: 10px; font-size: 24px; }
-    #meme-overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: sugarcane300px; display: none; }
+    #meme-overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: 300px; display: none; opacity: 0; transition: opacity 2s; }
+    #meme-overlay.show { display: block; opacity: 1; }
     #vibe-log { position: absolute; top: 50px; left: 10px; font-size: 18px; }
-    button { padding: 10px; margin: 5px; background: #ff0; color: #000; border: none; font-size: 18px; cursor: pointer; }
+    #avatar-container { position: absolute; top: 100px; left: 100px; opacity: 0; transition: opacity 2s; }
+    #avatar-container.show { opacity: 1; }
+    button, select, input { padding: 10px; margin: 5px; background: #ff0; color: #000; border: none; font-size: 18px; cursor: pointer; }
+    #custom-directive { display: none; }
   </style>
 </head>
 <body>
@@ -18,10 +22,21 @@
   <div id="hype-meter">Hype Score: 0</div>
   <div id="vibe-log">Vibe: Detecting...</div>
   <img id="meme-overlay" src="">
+  <div id="avatar-container">
+    <img id="avatar-img" src="">
+  </div>
   <div>
     <button onclick="dropMeme('https://i.imgflip.com/5z5x0m.jpg')">Talk Shit, Get Hit</button>
     <button onclick="generateAgent()">Generate AIZoomAgent</button>
-    <input id="chat-input" type="text" placeholder="Type chat to vibe check">
+    <select id="directive" onchange="toggleCustomDirective()">
+      <option value="match">Match Vibe</option>
+      <option value="hype">Hype the Room</option>
+      <option value="roast">Roast Presenter</option>
+      <option value="custom">Custom</option>
+    </select>
+    <input id="custom-directive" type="text" placeholder="Enter custom prompt">
+    <button onclick="applyDirective()">Apply Directive</button>
+    <input id="chat-input" type="text" placeholder="Type Zoom chat (paste URLs)">
     <button onclick="analyzeChat()">Vibe Check</button>
   </div>
 
@@ -31,18 +46,22 @@
   <!-- TensorFlow.js for vision -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.9.0/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface"></script>
+  <!-- Tesseract.js for text -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
+  <!-- YOLOv5 for object detection -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
 
-     <script>
-        // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-        const firebaseConfig = {
-            apiKey: "AIzaSyBONwaRl23VeTJISmiQ3X-t3y6FGK7Ngjc",
-            authDomain: "tglsmarthub.firebaseapp.com",
-            projectId: "tglsmarthub",
-            storageBucket: "tglsmarthub.firebasestorage.app",
-            messagingSenderId: "361291241205",
-            appId: "1:361291241205:web:854f79a0238e6e4795d7bc",
-            measurementId: "G-LQ4BP8GG37"
-        };
+  <script>
+    // Firebase config (your provided values)
+    const firebaseConfig = {
+      apiKey: "AIzaSyBONwaRl23VeTJISmiQ3X-t3y6FGK7Ngjc",
+      authDomain: "tglsmarthub.firebaseapp.com",
+      projectId: "tglsmarthub",
+      storageBucket: "tglsmarthub.firebasestorage.app",
+      messagingSenderId: "361291241205",
+      appId: "1:361291241205:web:854f79a0238e6e4795d7bc",
+      measurementId: "G-LQ4BP8GG37"
+    };
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
@@ -50,28 +69,35 @@
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     const memeOverlay = document.getElementById('meme-overlay');
+    const avatarImg = document.getElementById('avatar-img');
+    const avatarContainer = document.getElementById('avatar-container');
     const hypeMeter = document.getElementById('hype-meter');
     const vibeLog = document.getElementById('vibe-log');
     let hypeScore = 0;
     let vibe = 'neutral';
     let dominantColors = [];
     let commonObjects = [];
+    let lastVibeState = null;
+    let chatMemes = [];
 
-    // Load BlazeFace for face detection
-    let faceModel;
-    async function loadModel() {
+    // Load models
+    let faceModel, objectModel;
+    async function loadModels() {
       faceModel = await blazeface.load();
+      objectModel = await cocoSsd.load();
     }
-    loadModel();
+    loadModels();
 
-    // Analyze webcam streams
+    // Analyze screen
     async function analyzeCams(video) {
       const predictions = await faceModel.estimateFaces(video, false);
+      const objects = await objectModel.detect(video);
       let emotions = [];
       dominantColors = [];
       commonObjects = [];
+      let screenText = '';
 
-      // Dummy color detection (replace with real CV later)
+      // Color detection
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
       let r = 0, g = 0, b = 0, count = 0;
       for (let i = 0; i < imgData.length; i += 4) {
@@ -82,7 +108,7 @@
       }
       dominantColors.push(`rgb(${r/count},${g/count},${b/count})`);
 
-      // Emotion detection (simplified)
+      // Emotion detection
       if (predictions.length > 0) {
         emotions = predictions.map(p => p.landmarks[4][1] > p.landmarks[5][1] ? 'happy' : 'bored');
         vibe = emotions.reduce((a, b) => emotions.filter(v => v === a).length >= emotions.filter(v => v === b).length ? a : b);
@@ -90,61 +116,135 @@
         vibe = 'neutral';
       }
 
-      // Log vibe to Firebase
-      vibeLog.textContent = `Vibe: ${vibe}`;
-      db.ref('vibes').push({ vibe, timestamp: Date.now() });
+      // Object detection
+      commonObjects = objects.map(o => o.class);
+
+      // Text detection
+      const { data: { text } } = await Tesseract.recognize(video, 'eng');
+      screenText = text.toLowerCase();
+      if (screenText.includes('synergy') || screenText.includes('kpi')) {
+        vibe = 'corporate';
+        dropMeme(chatMemes.length ? chatMemes[0] : 'https://i.imgflip.com/789xyz.jpg');
+      }
+
+      // Save vibe state
+      lastVibeState = { vibe, dominantColors, commonObjects, screenText };
+      db.ref('vibes').push(lastVibeState);
+      vibeLog.textContent = `Vibe: ${vibe} | Text: ${screenText.substring(0, 50)}...`;
     }
 
     // Generate hyperrealistic avatar
-    async function generateAgent() {
-      // Simulate Stable Diffusion API call (replace with real API)
-      const prompt = `Hyperrealistic person, ${vibe} expression, wearing clothes matching ${dominantColors[0]}, in a ${commonObjects.length ? commonObjects[0] : 'modern office'} background`;
-      const avatarUrl = await fakeStableDiffusionAPI(prompt); // Placeholder
-      const avatarImg = new Image();
-      avatarImg.src = avatarUrl;
-      avatarImg.onload = () => ctx.drawImage(avatarImg, 100, 100, 300, 300);
-      db.ref('avatars').push({ url: avatarUrl, vibe, timestamp: Date.now() });
+    async function generateAgent(directive = 'match') {
+      let prompt = '';
+      if (directive === 'hype') prompt = `Hyperrealistic person, excited expression, vibrant clothes matching ${dominantColors[0] || 'rgb(255,255,255)'}, in a party background`;
+      else if (directive === 'roast') prompt = `Hyperrealistic person, sarcastic expression, dark clothes matching ${dominantColors[0] || 'rgb(0,0,0)'}, in a ${commonObjects.length ? commonObjects[0] : 'office'} background`;
+      else if (directive === 'custom') prompt = document.getElementById('custom-directive').value || `Hyperrealistic person, neutral expression, in a modern office`;
+      else prompt = `Hyperrealistic person, ${lastVibeState?.vibe || 'neutral'} expression, wearing clothes matching ${lastVibeState?.dominantColors[0] || 'rgb(255,255,255)'}, in a ${lastVibeState?.commonObjects[0] || 'modern office'} background`;
+
+      avatarContainer.classList.remove('show');
+      setTimeout(async () => {
+        const avatarUrl = await stableDiffusionAPI(prompt);
+        avatarImg.src = avatarUrl;
+        avatarContainer.classList.add('show');
+        db.ref('avatars').push({ url: avatarUrl, vibe: lastVibeState?.vibe || 'neutral', timestamp: Date.now() });
+      }, 2000);
     }
 
-    // Fake Stable Diffusion API (replace with real endpoint)
-    async function fakeStableDiffusionAPI(prompt) {
-      return 'https://i.imgur.com/abc456.png'; // Placeholder hyperrealistic image
+    // Stable Diffusion API
+    async function stableDiffusionAPI(prompt) {
+      const response = await fetch("https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2-1", {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer L3NumhFtiEZbTBoIFQmFW8fywmei1IwJNYijhXb2GRz2zRmPgf5i3XzJ1ZXY", // Your key
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ inputs: prompt })
+      });
+      const blob = await response.blob();
+      return URL.createObjectURL(blob);
     }
 
     // Meme drop function
     function dropMeme(url) {
-      memeOverlay.src = url;
-      memeOverlay.style.display = 'block';
-      setTimeout(() => memeOverlay.style.display = 'none', 3000);
-      db.ref('memes').push({ url, timestamp: Date.now() });
-      if (vibe === 'bored') dropMeme('https://i.imgflip.com/123abc.jpg'); // Extra meme for bored vibes
+      memeOverlay.classList.remove('show');
+      setTimeout(() => {
+        memeOverlay.src = url;
+        memeOverlay.classList.add('show');
+        setTimeout(() => memeOverlay.classList.remove('show'), 3000);
+        db.ref('memes').push({ url, timestamp: Date.now() });
+      }, 2000);
     }
 
     // Chat vibe check
     function analyzeChat() {
       const chat = document.getElementById('chat-input').value.toLowerCase();
+      const urlRegex = /(https?:\/\/[^\s]+\.(jpg|png|gif))/gi;
+      chatMemes = (chat.match(urlRegex) || []).filter(url => url.includes('imgflip') || url.includes('giphy'));
       if (chat.includes('shit') || chat.includes('fuck')) {
         hypeScore += 20;
         vibe = 'hype';
-        dropMeme('https://i.imgflip.com/5z5x0m.jpg'); // Talk Shit, Get Hit
+        dropMeme(chatMemes.length ? chatMemes[0] : 'https://i.imgflip.com/5z5x0m.jpg');
       } else {
         hypeScore += 5;
         vibe = 'chill';
       }
+      lastVibeState = { vibe, dominantColors, commonObjects, screenText: chat };
+      db.ref('vibes').push(lastVibeState);
+      vibeLog.textContent = `Vibe: ${vibe} | Memes: ${chatMemes.length}`;
       hypeMeter.textContent = `Hype Score: ${hypeScore}`;
       db.ref('hype').set(hypeScore);
     }
 
+    // Directive handling
+    function toggleCustomDirective() {
+      const directive = document.getElementById('directive').value;
+      document.getElementById('custom-directive').style.display = directive === 'custom' ? 'block' : 'none';
+    }
+
+    function applyDirective() {
+      const directive = document.getElementById('directive').value;
+      generateAgent(directive);
+    }
+
     // Virtual camera setup
+    let isScreenSharing = false;
     async function startVirtualCamera() {
       const stream = canvas.captureStream(30);
       const video = document.createElement('video');
-      video.srcObject = await navigator.mediaDevices.getUserMedia({ video: true });
+      try {
+        // Try VDO.Ninja for screen share
+        const peerConnection = new RTCPeerConnection({
+          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        });
+        peerConnection.ontrack = (event) => {
+          video.srcObject = event.streams[0];
+          isScreenSharing = true;
+        };
+        const offer = await fetch('https://vdo.ninja/?push=YOUR_VDO_NINJA_ID/offer', { method: 'POST' }).then(res => res.json());
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        await fetch('https://vdo.ninja/?push=YOUR_VDO_NINJA_ID/answer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(answer)
+        });
+      } catch (e) {
+        // Fallback to last vibe state
+        isScreenSharing = false;
+        db.ref('vibes').orderByChild('timestamp').limitToLast(1).once('value', snapshot => {
+          lastVibeState = snapshot.val() ? Object.values(snapshot.val())[0] : { vibe: 'neutral', dominantColors: ['rgb(255,255,255)'], commonObjects: ['office'] };
+          vibeLog.textContent = `Vibe: ${lastVibeState.vibe} (Using last state)`;
+        });
+      }
       video.play();
       video.onloadedmetadata = () => {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        analyzeCams(video); // Analyze cams continuously
-        setInterval(() => analyzeCams(video), 5000); // Update every 5s
+        if (isScreenSharing) analyzeCams(video);
+        setInterval(() => {
+          if (isScreenSharing) analyzeCams(video);
+          else generateAgent();
+        }, 5000);
       };
     }
     startVirtualCamera();
@@ -158,6 +258,20 @@
       requestAnimationFrame(draw);
     }
     draw();
+
+    // Voice detection
+    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+    recognition.continuous = true;
+    recognition.onresult = (event) => {
+      const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase();
+      if (transcript.includes('synergy') || transcript.includes('kpi')) {
+        vibe = 'corporate';
+        dropMeme(chatMemes.length ? chatMemes[0] : 'https://i.imgflip.com/789xyz.jpg');
+        lastVibeState = { vibe, dominantColors, commonObjects, screenText: transcript };
+        db.ref('vibes').push(lastVibeState);
+      }
+    };
+    recognition.start();
   </script>
 
   <!-- Service Worker -->
