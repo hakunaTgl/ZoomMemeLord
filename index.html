@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AIZoomAgent</title>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; background: #000; color: #fff; }
+    #canvas { border: 2px solid #ff0; }
+    #hype-meter { position: absolute; top: 10px; left: 10px; font-size: 24px; }
+    #meme-overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: sugarcane300px; display: none; }
+    #vibe-log { position: absolute; top: 50px; left: 10px; font-size: 18px; }
+    button { padding: 10px; margin: 5px; background: #ff0; color: #000; border: none; font-size: 18px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" width="1280" height="720"></canvas>
+  <div id="hype-meter">Hype Score: 0</div>
+  <div id="vibe-log">Vibe: Detecting...</div>
+  <img id="meme-overlay" src="">
+  <div>
+    <button onclick="dropMeme('https://i.imgflip.com/5z5x0m.jpg')">Talk Shit, Get Hit</button>
+    <button onclick="generateAgent()">Generate AIZoomAgent</button>
+    <input id="chat-input" type="text" placeholder="Type chat to vibe check">
+    <button onclick="analyzeChat()">Vibe Check</button>
+  </div>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js"></script>
+  <!-- TensorFlow.js for vision -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.9.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface"></script>
+
+  <script>
+    // Firebase config (your details from April 18, 2025)
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_AUTH_DOMAIN",
+      databaseURL: "YOUR_DATABASE_URL",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_STORAGE_BUCKET",
+      messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    // Canvas and setup
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const memeOverlay = document.getElementById('meme-overlay');
+    const hypeMeter = document.getElementById('hype-meter');
+    const vibeLog = document.getElementById('vibe-log');
+    let hypeScore = 0;
+    let vibe = 'neutral';
+    let dominantColors = [];
+    let commonObjects = [];
+
+    // Load BlazeFace for face detection
+    let faceModel;
+    async function loadModel() {
+      faceModel = await blazeface.load();
+    }
+    loadModel();
+
+    // Analyze webcam streams
+    async function analyzeCams(video) {
+      const predictions = await faceModel.estimateFaces(video, false);
+      let emotions = [];
+      dominantColors = [];
+      commonObjects = [];
+
+      // Dummy color detection (replace with real CV later)
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      let r = 0, g = 0, b = 0, count = 0;
+      for (let i = 0; i < imgData.length; i += 4) {
+        r += imgData[i];
+        g += imgData[i + 1];
+        b += imgData[i + 2];
+        count++;
+      }
+      dominantColors.push(`rgb(${r/count},${g/count},${b/count})`);
+
+      // Emotion detection (simplified)
+      if (predictions.length > 0) {
+        emotions = predictions.map(p => p.landmarks[4][1] > p.landmarks[5][1] ? 'happy' : 'bored');
+        vibe = emotions.reduce((a, b) => emotions.filter(v => v === a).length >= emotions.filter(v => v === b).length ? a : b);
+      } else {
+        vibe = 'neutral';
+      }
+
+      // Log vibe to Firebase
+      vibeLog.textContent = `Vibe: ${vibe}`;
+      db.ref('vibes').push({ vibe, timestamp: Date.now() });
+    }
+
+    // Generate hyperrealistic avatar
+    async function generateAgent() {
+      // Simulate Stable Diffusion API call (replace with real API)
+      const prompt = `Hyperrealistic person, ${vibe} expression, wearing clothes matching ${dominantColors[0]}, in a ${commonObjects.length ? commonObjects[0] : 'modern office'} background`;
+      const avatarUrl = await fakeStableDiffusionAPI(prompt); // Placeholder
+      const avatarImg = new Image();
+      avatarImg.src = avatarUrl;
+      avatarImg.onload = () => ctx.drawImage(avatarImg, 100, 100, 300, 300);
+      db.ref('avatars').push({ url: avatarUrl, vibe, timestamp: Date.now() });
+    }
+
+    // Fake Stable Diffusion API (replace with real endpoint)
+    async function fakeStableDiffusionAPI(prompt) {
+      return 'https://i.imgur.com/abc456.png'; // Placeholder hyperrealistic image
+    }
+
+    // Meme drop function
+    function dropMeme(url) {
+      memeOverlay.src = url;
+      memeOverlay.style.display = 'block';
+      setTimeout(() => memeOverlay.style.display = 'none', 3000);
+      db.ref('memes').push({ url, timestamp: Date.now() });
+      if (vibe === 'bored') dropMeme('https://i.imgflip.com/123abc.jpg'); // Extra meme for bored vibes
+    }
+
+    // Chat vibe check
+    function analyzeChat() {
+      const chat = document.getElementById('chat-input').value.toLowerCase();
+      if (chat.includes('shit') || chat.includes('fuck')) {
+        hypeScore += 20;
+        vibe = 'hype';
+        dropMeme('https://i.imgflip.com/5z5x0m.jpg'); // Talk Shit, Get Hit
+      } else {
+        hypeScore += 5;
+        vibe = 'chill';
+      }
+      hypeMeter.textContent = `Hype Score: ${hypeScore}`;
+      db.ref('hype').set(hypeScore);
+    }
+
+    // Virtual camera setup
+    async function startVirtualCamera() {
+      const stream = canvas.captureStream(30);
+      const video = document.createElement('video');
+      video.srcObject = await navigator.mediaDevices.getUserMedia({ video: true });
+      video.play();
+      video.onloadedmetadata = () => {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        analyzeCams(video); // Analyze cams continuously
+        setInterval(() => analyzeCams(video), 5000); // Update every 5s
+      };
+    }
+    startVirtualCamera();
+
+    // Animation loop
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#fff';
+      ctx.font = '20px Arial';
+      ctx.fillText('AIZoomAgent', 20, 50);
+      requestAnimationFrame(draw);
+    }
+    draw();
+  </script>
+
+  <!-- Service Worker -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/service-worker.js')
+        .then(reg => console.log('Service Worker Registered'))
+        .catch(err => console.error('Service Worker Failed:', err));
+    }
+  </script>
+</body>
+</html>
