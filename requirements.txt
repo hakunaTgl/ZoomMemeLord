@@ -1,0 +1,8 @@
+# ZoomMemeLord Dependencies (Optional for local dev)
+# Serve with: npx serve .
+npx==10.2.2
+serve==14.2.1                        
+
+
+
+
